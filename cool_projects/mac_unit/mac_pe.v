@@ -1,13 +1,13 @@
 `timescale 1ns / 1ps
 
-module wallace_tree_8to2 #(
+module wallace_tree #(
     parameter W = 32
 )(
     input  wire [(8*W)-1:0] pp_flat,
-    output wire signed [W-1:0] row0,
-    output wire signed [W-1:0] row1
+    input  wire signed [W-1:0] product,
+    output wire signed [W-1:0] rs_0,rc_0,
+    output wire signed [W-1:0] rs_1,rc_1
 );
-    // Extract partial products (you already accept this)
     wire signed [(W)-1:0] pp[0:7];
     genvar j;
     generate
@@ -16,41 +16,33 @@ module wallace_tree_8to2 #(
         end
     endgenerate
 
-    // ---------------- Stage 1: 8 -> 6 ----------------
     wire [W-1:0] s1_0, c1_0;
     wire [W-1:0] s1_1, c1_1;
+    wire [W-1:0] s1_2, c1_2;
+    wire [W-1:0] c2_0, c2_1;
 
     genvar i;
     generate
         for (i = 0; i < W; i = i + 1) begin
             fa fa1 (pp[0][i], pp[1][i], pp[2][i], s1_0[i], c1_0[i]);
             fa fa2 (pp[3][i], pp[4][i], pp[5][i], s1_1[i], c1_1[i]);
+            fa fa3 (pp[6][i], pp[7][i], product[i], s1_2[i], c1_2[i]);
         end
     endgenerate
 
     wire [W-1:0] c1_0s = {c1_0[W-2:0], 1'b0};
     wire [W-1:0] c1_1s = {c1_1[W-2:0], 1'b0};
-
-    // ---------------- Stage 2: 6 -> 4 ----------------
-    wire [W-1:0] s2_0, c2_0;
-    wire [W-1:0] s2_1, c2_1;
+    wire [W-1:0] c1_2s = {c1_2[W-2:0], 1'b0};
 
     generate
         for (i = 0; i < W; i = i + 1) begin
-            fa fa3 (s1_0[i], c1_0s[i], s1_1[i], s2_0[i], c2_0[i]);
-            fa fa4 (pp[6][i], pp[7][i], c1_1s[i], s2_1[i], c2_1[i]);
+            fa fa4 (s1_0[i], c1_0s[i], 0, rs_0[i], c2_0[i]);
+            fa fa5 (s1_1[i], c1_1s[i], 0, rs_1[i], c2_1[i]);
         end
     endgenerate
 
-    wire [W-1:0] c2_0s = {c2_0[W-2:0], 1'b0};
-    wire [W-1:0] c2_1s = {c2_1[W-2:0], 1'b0};
-
-    // ---------------- Stage 3: 4 -> 2 ----------------
-    generate
-        for (i = 0; i < W; i = i + 1) begin
-            fa fa5 (s2_0[i], c2_0s[i], s2_1[i], row0[i], row1[i]);
-        end
-    endgenerate
+    wire [W-1:0] rc_0s = {c2_0[W-2:0], 1'b0};
+    wire [W-1:0] rc_1s = {c2_1[W-2:0], 1'b0};
 
 endmodule
 
