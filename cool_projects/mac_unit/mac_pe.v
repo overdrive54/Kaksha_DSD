@@ -1,62 +1,121 @@
 `timescale 1ns / 1ps
 
 module wallace_tree #(
-    parameter W = 32
+    parameter W  = 32,
+    parameter g = 4
 )(
     input  wire [(8*W)-1:0] pp_flat,
-    input  wire signed [W-1:0] product,
-    output wire signed [W-1:0] rs_0,rc_0,
-    output wire signed [W-1:0] rs_1,rc_1
+    input  wire signed [W-1:0] acc_in,
+
+    output wire [(W)+g-1:0] row0,
+    output wire [(W)+g-1:0] row1
 );
-    wire signed [(W)-1:0] pp[0:7];
+    localparam WT = (W) + g;  // guard bits for sign + carry
+    // -------------------------------------------------
+    // Unpack partial products and sign-extend
+    // -------------------------------------------------
+    wire [WT-1:0] pp [0:7];
+
     genvar j;
     generate
         for (j = 0; j < 8; j = j + 1) begin
-            assign pp[j] = pp_flat[(j+1)*(W)-1 -: (W)];
+            wire [W-1:0] pp_w;
+            assign pp_w = pp_flat[(j+1)*W-1 -: W];
+
+            // sign-extend once
+            assign pp[j] = {{(WT-W){pp_w[W-1]}}, pp_w};
         end
     endgenerate
 
-    wire [W-1:0] s1_0, c1_0;
-    wire [W-1:0] s1_1, c1_1;
-    wire [W-1:0] s1_2, c1_2;
-    wire [W-1:0] c2_0, c2_1;
+    // Sign-extend accumulator
+    wire [WT-1:0] product_ext;
+    assign product_ext = {{(WT-W){acc_in[W-1]}}, acc_in};
+
+    // -------------------------------------------------
+    // Stage 1: 9 → 6 (three CSAs)
+    // -------------------------------------------------
+    wire [WT-1:0] s1_0, c1_0;
+    wire [WT-1:0] s1_1, c1_1;
+    wire [WT-1:0] s1_2, c1_2;
 
     genvar i;
     generate
-        for (i = 0; i < W; i = i + 1) begin
+        for (i = 0; i < WT; i = i + 1) begin
             fa fa1 (pp[0][i], pp[1][i], pp[2][i], s1_0[i], c1_0[i]);
             fa fa2 (pp[3][i], pp[4][i], pp[5][i], s1_1[i], c1_1[i]);
-            fa fa3 (pp[6][i], pp[7][i], product[i], s1_2[i], c1_2[i]);
+            fa fa3 (pp[6][i], pp[7][i], product_ext[i], s1_2[i], c1_2[i]);
         end
     endgenerate
 
-    wire [W-1:0] c1_0s = {c1_0[W-2:0], 1'b0};
-    wire [W-1:0] c1_1s = {c1_1[W-2:0], 1'b0};
-    wire [W-1:0] c1_2s = {c1_2[W-2:0], 1'b0};
+    // shift carries
+    wire [WT-1:0] c1_0s = {c1_0[WT-2:0], 1'b0};
+    wire [WT-1:0] c1_1s = {c1_1[WT-2:0], 1'b0};
+    wire [WT-1:0] c1_2s = {c1_2[WT-2:0], 1'b0};
 
+    // -------------------------------------------------
+    // Stage 2: 6 → 4
+    // -------------------------------------------------
+    wire [WT-1:0] c2_0, c2_1,s2_0,s2_1;
+    wire [WT-1:0] c2_0s, c2_1s;
     generate
-        for (i = 0; i < W; i = i + 1) begin
-            fa fa4 (s1_0[i], c1_0s[i], 0, rs_0[i], c2_0[i]);
-            fa fa5 (s1_1[i], c1_1s[i], 0, rs_1[i], c2_1[i]);
+        for (i = 0; i < WT; i = i + 1) begin
+            fa fa4 (s1_0[i], c1_0s[i], s1_2[i], s2_0[i], c2_0[i]);
+            fa fa5 (s1_1[i], c1_1s[i], c1_2s[i], s2_1[i], c2_1[i]);
         end
     endgenerate
 
-    wire [W-1:0] rc_0s = {c2_0[W-2:0], 1'b0};
-    wire [W-1:0] rc_1s = {c2_1[W-2:0], 1'b0};
+    // shift final carries
+    assign c2_0s = {c2_0[WT-2:0], 1'b0};
+    assign c2_1s = {c2_1[WT-2:0], 1'b0};
+    
+    
+    wire [WT-1:0] c3_0,s3_0;
+    wire [WT-1:0] c3_0s;
+    
+    generate
+        for (i = 0; i < WT; i = i + 1) begin
+            fa fa6 (s2_0[i], c2_0s[i], s2_1[i], s3_0[i], c3_0[i]);
+        end
+    endgenerate
+    
+    assign c3_0s = {c3_0[WT-2:0], 1'b0};
+    
+    wire [WT-1:0] c4_0;
+    
+    generate
+        for (i = 0; i < WT; i = i + 1) begin
+            fa fa7 (s3_0[i], c3_0s[i], c2_1s[i], row0[i], c4_0[i]);
+        end
+    endgenerate
+
+    assign row1 = {c4_0[WT-2:0], 1'b0};
 
 endmodule
 
-module multiplier_16bit(
+module multiplier_16bit #(
+parameter W=16,
+parameter g=4
+) (
     input  wire clk,
     input  wire rst,
-    input  wire signed [15:0] a,
-    input  wire signed [15:0] b,
-    output reg  signed [31:0] product,
-    output  reg signed [15:0] a_out,b_out
-);
 
+    input  wire signed [W-1:0] a,
+    input  wire signed [W-1:0] b,
+
+    output reg  signed [2*W-1:0] product,
+    output reg  signed [W-1:0]   a_out,
+    output reg  signed [W-1:0]   b_out
+);
+    localparam WT = (2*W)+g;
+    // ----------------------------------------
+    // Accumulator register (explicit, safe)
+    // ----------------------------------------
+    reg signed [2*W-1:0] acc_reg;
+
+    // ----------------------------------------
     // Booth partial products
-    wire signed [255:0] pp_flat;
+    // ----------------------------------------
+    wire signed [(8*2*W)-1:0] pp_flat;
 
     booth_radix4 booth (
         .a(a),
@@ -64,35 +123,52 @@ module multiplier_16bit(
         .pp_flat(pp_flat)
     );
 
-    // Wallace tree reduction
-    wire signed [31:0] row0, row1;
+    // ----------------------------------------
+    // Wallace tree: 9 → 2 compression
+    // ----------------------------------------
+    wire signed [WT-1:0] row0, row1;
 
-    wallace_tree_8to2 wt (
+    wallace_tree wt (
         .pp_flat(pp_flat),
-        .row0(row0),
-        .row1(row1)
+        .acc_in (acc_reg),
+        .row0   (row0),
+        .row1   (row1)
     );
 
-    // Final adder
-    wire signed [31:0] final_sum,sum;
-    wire cout;
-    //assign final_sum = row0 + row1;
-    carry_skip_adder #(.W(32)) csa1 ( .a(row0), .b(row1), .cin(0), .sum(sum), .cout(cout) );
-    carry_skip_adder #(.W(32)) csa2 ( .a(sum), .b(product), .cin(cout), .sum(final_sum), .cout() );
+    // ----------------------------------------
+    // Final carry-propagate adder
+    // ----------------------------------------
+    wire signed [WT-1:0] final_sum_wide;
 
-    // Register output
+    carry_skip_adder cpa (
+        .a   (row0),
+        .b   (row1),
+        .cin (1'b0),
+        .sum (final_sum_wide),
+        .cout()
+    );
+
+    // ----------------------------------------
+    // Sequential logic
+    // ----------------------------------------
     always @(posedge clk) begin
         if (rst) begin
             product <= 0;
-            b_out <= 0;
-            a_out <= 0;
+            acc_reg <= 0;
+            a_out   <= 0;
+            b_out   <= 0;
         end else begin
-            product <= final_sum;
+            // truncate once, at architectural boundary
+            product <= final_sum_wide[2*W-1:0];
+            acc_reg <= final_sum_wide[2*W-1:0];
+
             a_out <= a;
             b_out <= b;
-    end end
+        end
+    end
 
 endmodule
+
 
 module cla_4bit (
     input  wire [3:0] a, b,
@@ -115,18 +191,17 @@ module cla_4bit (
     assign prop = &p;
 endmodule
 
-// ============================================================================
-// Carry-Skip Adder
-// ============================================================================
 module carry_skip_adder #(
-    parameter W = 32
+    parameter W = 16,
+    parameter g = 4
 )(
-    input  wire [W-1:0] a, b,
+    input  wire [(W*2)+g-1:0] a, b,
     input  wire         cin,
-    output wire [W-1:0] sum,
+    output wire [(W*2)+g-1:0] sum,
     output wire         cout
 );
-    localparam BLOCKS = W / 4;
+    localparam WT = (2*W)+g;
+    localparam BLOCKS = WT / 4;
     wire [BLOCKS:0] c;
     wire [BLOCKS-1:0] block_prop;
     assign c[0] = cin;
@@ -148,9 +223,6 @@ module carry_skip_adder #(
     assign cout = c[BLOCKS];
 endmodule
 
-// ============================================================================
-// Booth Radix-4 Encoder
-// ============================================================================
 module booth_radix4 #(
     parameter W = 16
 )(
