@@ -1,2 +1,2 @@
-# Digital-System-Design_assignments_Kaksha
-has digital system design assignment codes
+# Digital-System-Design_Kaksha
+has digital design codes and Waveforms
