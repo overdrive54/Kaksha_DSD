@@ -28,7 +28,6 @@ module vector_hazard_detector #(
 
         // 2. The Bitwise AND Check
         // REFACTOR: Explicitly flatten the 2D arrays into 1D bitstreams using {...} 
-        // to guarantee tool portability across strict ASIC and FPGA synthesisers.
         bytes_overlap = |({byte_en_0_i} & {byte_en_1_i});
 
         // 3. Generate the Stall
@@ -116,7 +115,6 @@ module vreg_writeback_stage #(
     parameter int unsigned WR_PORTS  = 2
 )(
     input  logic clk_i,
-    //input  logic reset_ni, // Kept on top-level boundary for system compatibility
 
     // ==========================================
     // READ INTERFACE (Pass-through to RF)
@@ -186,9 +184,6 @@ module vreg_writeback_stage #(
         rf_wr_be[1]   = be_lsu_i;
     end
 
-    // ---------------------------------------------------------
-    // 3. INSTANTIATE THE REGISTER FILE (7-Port BRAM Variant)
-    // ---------------------------------------------------------
     vreg #(
         .NUM_LANES(NUM_LANES),
         .VREG_W(VREG_W),
